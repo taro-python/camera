@@ -1,29 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: monospace; }
+        body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; color: #00ff00; }
         
-        /* カメラ映像 */
+        /* カメラ映像（背景） */
         #video-feed { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
 
         /* UIオーバーレイ */
-        #ui-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; color: #00ff00; }
+        #ui-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
         
-        #mgrs-display { position: absolute; top: 10px; right: 10px; text-align: right; }
-        #display { position: absolute; bottom: 50px; width: 100%; text-align: center; font-size: 3rem; }
+        #mgrs-display { position: absolute; top: 20px; right: 20px; font-size: 1.2rem; background: rgba(0,0,0,0.5); padding: 5px; }
+        #display { position: absolute; bottom: 50px; width: 100%; text-align: center; font-size: 3rem; text-shadow: 2px 2px 2px #000; }
 
-        /* 十字線 */
+        /* 十字線 (中央固定) */
         .crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
-        .h-line { width: 50px; height: 1px; background: #00ff00; }
-        .v-line { width: 1px; height: 50px; background: #00ff00; position: absolute; top: -25px; left: 25px; }
+        .h-line { width: 60px; height: 2px; background: #00ff00; box-shadow: 0 0 5px #00ff00; }
+        .v-line { width: 2px; height: 60px; background: #00ff00; position: absolute; top: -30px; left: 29px; box-shadow: 0 0 5px #00ff00; }
 
+        /* スタートボタン */
         #start-btn { 
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            padding: 20px; font-size: 1.5rem; z-index: 3; background: #1a1a1a; color: #00ff00; border: 2px solid #00ff00; cursor: pointer;
+            padding: 20px 40px; font-size: 1.2rem; z-index: 10; 
+            background: #111; color: #00ff00; border: 2px solid #00ff00; 
+            cursor: pointer; pointer-events: auto;
         }
     </style>
 </head>
@@ -32,7 +36,7 @@
     <video id="video-feed" autoplay playsinline muted></video>
     
     <div id="ui-layer">
-        <div id="mgrs-display">MGRS: INITIALIZING...</div>
+        <div id="mgrs-display">MGRS: WAITING FOR GPS...</div>
         <div class="crosshair">
             <div class="h-line"></div>
             <div class="v-line"></div>
@@ -40,7 +44,7 @@
         <div id="display">0000 MIL</div>
     </div>
     
-    <button id="start-btn">ENABLE SENSORS & CAMERA</button>
+    <button id="start-btn">起動 (センサー・カメラ許可)</button>
 
     <script>
         const btn = document.getElementById('start-btn');
@@ -49,40 +53,44 @@
         const mgrsText = document.getElementById('mgrs-display');
 
         btn.addEventListener('click', async () => {
-            // 1. カメラ起動
+            // 1. カメラとセンサーの許可を同時にリクエスト
             try {
+                // カメラ起動
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' } 
                 });
                 video.srcObject = stream;
-            } catch (err) { alert("Camera Error: " + err); }
 
-            // 2. センサー許可 (iOS対応)
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                const p1 = await DeviceOrientationEvent.requestPermission();
-                if (p1 !== 'granted') return;
-            }
-            
-            // 3. GPS開始
-            if (navigator.geolocation) {
-                navigator.geolocation.watchPosition((pos) => {
-                    try {
+                // iOS向け：DeviceOrientationの許可
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission !== 'granted') throw new Error("Sensor permission denied");
+                }
+
+                // 2. GPS開始
+                if (navigator.geolocation) {
+                    mgrsText.innerText = "MGRS: LOCATING...";
+                    navigator.geolocation.watchPosition((pos) => {
                         const mgrsResult = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
                         mgrsText.innerText = `MGRS: ${mgrsResult}`;
-                    } catch(e) { mgrsText.innerText = "MGRS Error"; }
-                }, null, { enableHighAccuracy: true });
-            }
-
-            btn.style.display = 'none';
-            
-            // 4. コンパス反映
-            window.addEventListener('deviceorientation', (event) => {
-                let heading = event.webkitCompassHeading || event.alpha;
-                if (heading !== null) {
-                    let mils = Math.round(heading * (6400 / 360));
-                    display.innerText = mils.toString().padStart(4, '0') + " MIL";
+                    }, (err) => {
+                        mgrsText.innerText = "GPS ERROR: " + err.message;
+                    }, { enableHighAccuracy: true });
                 }
-            });
+
+                // 3. コンパス反映
+                window.addEventListener('deviceorientation', (event) => {
+                    let heading = event.webkitCompassHeading || event.alpha;
+                    if (heading !== null) {
+                        let mils = Math.round(heading * (6400 / 360));
+                        display.innerText = mils.toString().padStart(4, '0') + " MIL";
+                    }
+                });
+
+                btn.style.display = 'none';
+            } catch (err) {
+                alert("エラー: " + err.message + "\n※HTTPS環境であるか確認してください。");
+            }
         });
     </script>
 </body>
