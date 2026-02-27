@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Canvas Tactical HUD</title>
+    <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; }
         #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; }
-        #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; }
-        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; }
+        #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; cursor: pointer; background: #111; color: #00ff00; border: 2px solid #00ff00; }
     </style>
 </head>
 <body>
@@ -24,7 +24,6 @@
         let currentMGRS = "INITIALIZING...";
         let currentMIL = "0000";
 
-        // キャンバスサイズを画面に合わせる
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -32,53 +31,81 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // 描画ループ
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = '#00ff00';
-            ctx.fillStyle = '#00ff00';
-            ctx.font = '20px monospace';
+            
+            // 十字線と目盛り設定
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const strokeColor = '#00ff00';
+            
+            ctx.strokeStyle = strokeColor;
+            ctx.fillStyle = strokeColor;
+            ctx.lineWidth = 1;
 
-            // 十字線
+            // --- 十字線 ---
             ctx.beginPath();
-            ctx.moveTo(canvas.width/2, 0); ctx.lineTo(canvas.width/2, canvas.height);
-            ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2);
+            ctx.moveTo(centerX, 0); ctx.lineTo(centerX, canvas.height);
+            ctx.moveTo(0, centerY); ctx.lineTo(canvas.width, centerY);
             ctx.stroke();
 
-            // MGRS (右上)
-            ctx.fillText(currentMGRS, canvas.width - 250, 40);
+            // --- 10MIL刻みの目盛り ---
+            // 画面の高さ（または幅）を適当なMIL換算（仮に1000MILとする）として目盛りを描画
+            // ※簡易的な計算のため、環境に合わせて調整してください
+            const unit = 20; // 10MILあたりのピクセル距離（調整可能）
+            for (let i = 1; i <= 5; i++) {
+                const dist = i * unit;
+                const len = 10; // 目盛りの長さ
+                // 上下
+                ctx.moveTo(centerX - 5, centerY - dist); ctx.lineTo(centerX + 5, centerY - dist);
+                ctx.moveTo(centerX - 5, centerY + dist); ctx.lineTo(centerX + 5, centerY + dist);
+                // 左右
+                ctx.moveTo(centerX - dist, centerY - 5); ctx.lineTo(centerX - dist, centerY + 5);
+                ctx.moveTo(centerX + dist, centerY - 5); ctx.lineTo(centerX + dist, centerY + 5);
+            }
+            ctx.stroke();
 
-            // MIL (下部)
-            ctx.font = '40px monospace';
-            ctx.fillText(currentMIL + " MIL", canvas.width/2 - 80, canvas.height - 50);
+            // --- MGRS (右上に固定) ---
+            ctx.font = '16px monospace';
+            const mgrsText = "MGRS: " + currentMGRS;
+            const mgrsWidth = ctx.measureText(mgrsText).width;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(canvas.width - mgrsWidth - 20, 10, mgrsWidth + 10, 30);
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText(mgrsText, canvas.width - mgrsWidth - 15, 32);
+
+            // --- MIL (下部中央に固定) ---
+            ctx.font = '30px monospace';
+            const milText = currentMIL + " MIL";
+            const milWidth = ctx.measureText(milText).width;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(centerX - milWidth/2 - 10, canvas.height - 60, milWidth + 20, 40);
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText(milText, centerX - milWidth/2, canvas.height - 30);
 
             requestAnimationFrame(draw);
         }
         draw();
 
         btn.addEventListener('click', async () => {
-            // センサー許可
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const res = await DeviceOrientationEvent.requestPermission();
                 if (res !== 'granted') return;
             }
-            // カメラ起動
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             document.getElementById('video-feed').srcObject = stream;
             btn.style.display = 'none';
 
-            // GPS監視
             navigator.geolocation.watchPosition((pos) => {
                 const res = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
-                currentMGRS = "MGRS: " + res.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
+                currentMGRS = res.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
             }, null, { enableHighAccuracy: true });
 
-            // 方位監視
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    let correctedHeading = (heading - (window.orientation || 0) + 360) % 360;
-                    currentMIL = Math.round(correctedHeading * (6400 / 360)).toString().padStart(4, '0');
+                    // 回転補正なしの純粋な方位
+                    currentMIL = Math.round(heading * (6400 / 360)).toString().padStart(4, '0');
                 }
             });
         });
