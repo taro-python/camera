@@ -6,21 +6,32 @@
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', Courier, monospace; }
         #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
         #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
-        .controls { position: fixed; bottom: 20px; z-index: 20; display: flex; gap: 10px; left: 50%; transform: translateX(-50%); }
-        button, input { pointer-events: auto; padding: 15px; font-size: 1.2rem; }
-        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; }
+        
+        /* ボタンと操作系を右下に配置 */
+        #controls-container {
+            position: fixed; bottom: 30px; right: 20px; z-index: 20;
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
+            pointer-events: auto;
+        }
+        #snap-btn {
+            width: 70px; height: 70px; border-radius: 50%;
+            background: #fff; border: 4px solid #333; cursor: pointer;
+        }
+        #zoom-slider { width: 100px; }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; }
     </style>
 </head>
 <body>
     <video id="video-feed" autoplay playsinline muted></video>
     <canvas id="canvas-ui"></canvas>
-    <button id="start-btn">ENABLE SENSORS & CAMERA</button>
-    <div class="controls">
+    <button id="start-btn">カメラ起動</button>
+    
+    <div id="controls-container">
         <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1" style="display:none;">
-        <button id="snap-btn" style="display:none;">撮影</button>
+        <button id="snap-btn" style="display:none;"></button>
     </div>
 
     <script>
@@ -29,9 +40,8 @@
         const btn = document.getElementById('start-btn');
         const snapBtn = document.getElementById('snap-btn');
         const zoomSlider = document.getElementById('zoom-slider');
-        let currentMGRS = "INITIALIZING...";
+        let currentMGRS = "---";
         let currentMIL = "0000";
-        let videoTrack = null;
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -44,81 +54,74 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const cx = canvas.width / 2;
             const cy = canvas.height / 2;
-            ctx.strokeStyle = '#00ff00';
+            const now = new Date();
+            
+            // --- 日時 (左上) ---
             ctx.fillStyle = '#00ff00';
-            ctx.lineWidth = 2;
+            ctx.font = '14px monospace';
+            const timeStr = now.toLocaleDateString() + " " + now.toLocaleTimeString();
+            ctx.fillText(timeStr, 20, 30);
 
-            // --- 1. 十字線 ---
+            // --- 十字線 & メモリ ---
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
             ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
-            ctx.stroke();
-
-            // --- 2. 目盛り (10MIL刻み、50まで) ---
-            const tickSpacing = 25; // 10MILごとの間隔(px)
+            
+            // 10ミル刻み (50ミルまで)
+            const tickSpacing = 20;
             for(let i=1; i<=5; i++) {
                 const d = i * tickSpacing;
-                // 上下左右に描画
-                ctx.moveTo(cx - 5, cy - d); ctx.lineTo(cx + 5, cy - d); // 上
-                ctx.moveTo(cx - 5, cy + d); ctx.lineTo(cx + 5, cy + d); // 下
-                ctx.moveTo(cx - d, cy - 5); ctx.lineTo(cx - d, cy + 5); // 左
-                ctx.moveTo(cx + d, cy - 5); ctx.lineTo(cx + d, cy + 5); // 右
+                ctx.moveTo(cx-5, cy-d); ctx.lineTo(cx+5, cy-d);
+                ctx.moveTo(cx-5, cy+d); ctx.lineTo(cx+5, cy+d);
+                ctx.moveTo(cx-d, cy-5); ctx.lineTo(cx-d, cy+5);
+                ctx.moveTo(cx+d, cy-5); ctx.lineTo(cx+d, cy+5);
             }
             ctx.stroke();
 
-            // --- 3. MGRS (右上に収まるように描画) ---
-            ctx.font = '16px monospace';
+            // --- MGRS (小さく、右側に固定) ---
+            ctx.font = '12px monospace';
             const mgrsStr = "MGRS: " + currentMGRS;
-            // 縦線の右側に配置。はみ出さない計算
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(cx + 10, 10, 200, 30);
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(cx + 10, 10, 160, 20);
             ctx.fillStyle = '#00ff00';
-            ctx.fillText(mgrsStr, cx + 20, 30);
+            ctx.fillText(mgrsStr, cx + 15, 25);
 
-            // --- 4. MIL (下部中央) ---
-            ctx.font = 'bold 30px monospace';
-            const milStr = currentMIL + " MIL";
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(cx - 70, canvas.height - 80, 140, 50);
-            ctx.fillStyle = '#00ff00';
-            ctx.fillText(milStr, cx - 60, canvas.height - 45);
+            // --- MIL (下部中央) ---
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText(currentMIL + " MIL", cx - 40, canvas.height - 40);
 
             requestAnimationFrame(draw);
         }
         draw();
 
+        // 起動処理
         btn.addEventListener('click', async () => {
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                const res = await DeviceOrientationEvent.requestPermission();
-                if (res !== 'granted') return;
-            }
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             document.getElementById('video-feed').srcObject = stream;
-            videoTrack = stream.getVideoTracks()[0];
             btn.style.display = 'none';
             zoomSlider.style.display = 'block';
             snapBtn.style.display = 'block';
-
-            navigator.geolocation.watchPosition((pos) => {
+            
+            // センサー系
+            navigator.geolocation.watchPosition(pos => {
                 const res = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
                 currentMGRS = res.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
             }, null, { enableHighAccuracy: true });
-
-            window.addEventListener('deviceorientation', (e) => {
-                if (e.webkitCompassHeading) currentMIL = Math.round(e.webkitCompassHeading * (6400/360)).toString().padStart(4, '0');
-            });
         });
 
-        zoomSlider.addEventListener('input', (e) => videoTrack.applyConstraints({ advanced: [{ zoom: e.target.value }] }));
-
+        // 撮影
         snapBtn.addEventListener('click', () => {
             const cap = document.createElement('canvas');
             cap.width = canvas.width; cap.height = canvas.height;
             const c = cap.getContext('2d');
             c.drawImage(document.getElementById('video-feed'), 0, 0);
             c.drawImage(canvas, 0, 0);
-            const link = document.createElement('a');
-            link.download = "HUD_SNAP.png"; link.href = cap.toDataURL(); link.click();
+            const a = document.createElement('a');
+            a.download = "HUD_" + Date.now() + ".png";
+            a.href = cap.toDataURL();
+            a.click();
         });
     </script>
 </body>
