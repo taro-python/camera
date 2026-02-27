@@ -2,53 +2,34 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { 
-            margin: 0; background: #000; color: #00ff00; 
-            font-family: 'Courier New', monospace; overflow: hidden; 
-            width: 100vw; height: 100vh;
-        }
+        body { margin: 0; background: #000; color: #00ff00; font-family: monospace; overflow: hidden; }
+        #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
         
-        /* ビデオは固定して背面に */
-        #video-feed { 
-            position: fixed; width: 100vw; height: 100vh; 
-            object-fit: cover; z-index: 1; 
-        }
-
-        /* UI層を固定：カメラ起動後もこのサイズを維持する */
         #ui-layer { 
-            position: fixed; top: 0; left: 0; 
-            width: 100vw; height: 100vh; 
-            z-index: 2; pointer-events: none;
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; 
+            pointer-events: none;
         }
 
-        .bg-panel { background: rgba(0, 0, 0, 0.7); padding: 5px 10px; border: 1px solid #00ff00; }
+        .bg-panel { background: rgba(0, 0, 0, 0.7); padding: 8px 12px; border: 1px solid #00ff00; }
 
-        /* 座標（右上） */
-        #mgrs-display { position: absolute; top: 10px; right: 10px; font-size: 0.8rem; }
+        #mgrs-display { position: absolute; top: 40px; right: 20px; font-size: 0.9rem; }
         
-        /* MIL表示（下部） */
         #display-container {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 5px; font-size: 2.0rem;
+            position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; font-size: 2.5rem;
         }
 
-        /* 十字線（常に画面中央） */
         .crosshair-h { position: absolute; top: 50%; left: 0; width: 100vw; height: 1px; background: #00ff00; }
         .crosshair-v { position: absolute; left: 50%; top: 0; width: 1px; height: 100vh; background: #00ff00; }
 
-        /* 起動ボタン */
         #start-btn { 
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            padding: 20px; z-index: 10; pointer-events: auto; background: #111; color: #00ff00; border: 2px solid #00ff00; 
-        }
-
-        /* 横持ち時の強制CSS */
-        @media screen and (orientation: landscape) {
-            /* 横持ち時はここを調整 */
+            padding: 20px; z-index: 10; pointer-events: auto; 
+            background: #111; color: #00ff00; border: 2px solid #00ff00; 
         }
     </style>
 </head>
@@ -76,35 +57,33 @@
         function formatMGRS(str) { return str.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3'); }
 
         btn.addEventListener('click', async () => {
-            // センサー許可
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const response = await DeviceOrientationEvent.requestPermission();
                 if (response !== 'granted') { alert("センサー許可が必要です"); return; }
             }
 
-            // カメラ起動
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
             } catch (e) { alert("カメラエラー: " + e.message); }
 
             btn.style.display = 'none';
 
-            // GPS
             navigator.geolocation.watchPosition((pos) => {
                 const mgrsResult = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
                 mgrsText.innerText = "MGRS: " + formatMGRS(mgrsResult);
             }, null, { enableHighAccuracy: true });
 
-            // コンパス（横持ち補正ロジック）
+            // ★ここが重要：カメラの方角を基準にする補正
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    // window.orientation で端末の回転状態を常に取得
-                    const orientation = window.orientation || 0;
-                    let correctedHeading = (heading - orientation + 360) % 360;
+                    // 現在の画面の回転角度を取得 (0, 90, 180, 270)
+                    const angle = (screen.orientation && screen.orientation.angle) ? screen.orientation.angle : 0;
+                    
+                    // 「heading(画面上部基準)」から「画面の回転分」を引くことで
+                    // 背面カメラが向いている絶対方位を算出する
+                    let correctedHeading = (heading - angle + 360) % 360;
                     
                     let mils = Math.round(correctedHeading * (6400 / 360));
                     displayNum.innerText = mils.toString().padStart(4, '0');
