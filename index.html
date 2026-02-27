@@ -37,12 +37,29 @@
             const cy = canvas.height / 2;
             const now = new Date();
             
-            // --- 十字線 ---
+            // --- 十字線 & メモリ描画 ---
             ctx.strokeStyle = '#00ff00';
             ctx.lineWidth = 1;
             ctx.beginPath();
+            
+            // 十字線
             ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
             ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
+
+            // メモリ (10ミル刻み)
+            const tickSpacing = 20; // 画面上のピクセル間隔
+            const tickLength = 10;  // 線の長さ
+            for(let i = 1; i <= 20; i++) {
+                const dist = i * tickSpacing;
+                // 右
+                ctx.moveTo(cx + dist, cy - tickLength/2); ctx.lineTo(cx + dist, cy + tickLength/2);
+                // 左
+                ctx.moveTo(cx - dist, cy - tickLength/2); ctx.lineTo(cx - dist, cy + tickLength/2);
+                // 上
+                ctx.moveTo(cx - tickLength/2, cy - dist); ctx.lineTo(cx + tickLength/2, cy - dist);
+                // 下
+                ctx.moveTo(cx - tickLength/2, cy + dist); ctx.lineTo(cx + tickLength/2, cy + dist);
+            }
             ctx.stroke();
 
             // --- 1. 日時 (左上) ---
@@ -66,7 +83,6 @@
             const milStr = currentMIL + " MIL";
             ctx.font = 'bold 32px monospace';
             const milW = ctx.measureText(milStr).width;
-            // 下部の安全エリアを考慮して少し高さを確保
             ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
             ctx.fillRect(cx - (milW / 2) - 15, canvas.height - 90, milW + 30, 50);
             ctx.fillStyle = '#00ff00';
