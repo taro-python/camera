@@ -2,126 +2,157 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
-        #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+        
+        /* カメラ映像（背景） */
+        #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
+        
+        /* UI層：Canvasで描画 */
         #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
         
-        /* ズーム用スライダー: カメラ起動後に表示 */
-        #zoom-slider { 
-            position: fixed; bottom: 100px; left: 20px; z-index: 20; 
-            width: 150px; pointer-events: auto; display: none;
+        /* 撮影・起動ボタン共通スタイル */
+        .btn {
+            position: fixed; z-index: 20; padding: 15px 25px; 
+            cursor: pointer; background: #111; color: #00ff00; 
+            border: 2px solid #00ff00; font-family: monospace; font-size: 1.1rem;
         }
-        
-        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; cursor: pointer; background: #111; color: #00ff00; border: 2px solid #00ff00; }
+
+        /* 起動ボタン：画面中央 */
+        #start-btn { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+        /* 撮影ボタン：右下（Safe Areaを考慮） */
+        #snap-btn {
+            bottom: max(20px, env(safe-area-inset-bottom)); right: 20px;
+            display: none; border-radius: 50%; aspect-ratio: 1; padding: 20px;
+        }
     </style>
 </head>
 <body>
     <video id="video-feed" autoplay playsinline muted></video>
     <canvas id="canvas-ui"></canvas>
-    <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1">
-    <button id="start-btn">ENABLE SENSORS & CAMERA</button>
+    <button id="start-btn" class="btn">INITIALIZE HUD</button>
+    <button id="snap-btn" class="btn">○</button>
 
     <script>
+        const btn = document.getElementById('start-btn');
+        const snapBtn = document.getElementById('snap-btn');
+        const video = document.getElementById('video-feed');
         const canvas = document.getElementById('canvas-ui');
         const ctx = canvas.getContext('2d');
-        const btn = document.getElementById('start-btn');
-        const slider = document.getElementById('zoom-slider');
         let currentMGRS = "INITIALIZING...";
         let currentMIL = "0000";
-        let videoTrack = null;
 
-        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-        window.addEventListener('resize', resize);
-        resize();
+        // Canvasサイズを画面に合わせる
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
 
-        function draw() {
+        // 描画ループ：毎フレーム実行
+        function drawHUD() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
             ctx.strokeStyle = '#00ff00';
-            ctx.fillStyle = '#00ff00';
+            ctx.lineWidth = 1;
 
-            // 十字線
+            // --- 1. 十字線 ---
             ctx.beginPath();
             ctx.moveTo(centerX, 0); ctx.lineTo(centerX, canvas.height);
             ctx.moveTo(0, centerY); ctx.lineTo(canvas.width, centerY);
             ctx.stroke();
 
-            // 10MIL刻みの目盛り
-            const unit = 20;
-            for (let i = 1; i <= 5; i++) {
-                const dist = i * unit;
-                ctx.moveTo(centerX - 5, centerY - dist); ctx.lineTo(centerX + 5, centerY - dist);
-                ctx.moveTo(centerX - 5, centerY + dist); ctx.lineTo(centerX + 5, centerY + dist);
-                ctx.moveTo(centerX - dist, centerY - 5); ctx.lineTo(centerX + dist, centerY - 5);
-                ctx.moveTo(centerX + dist, centerY - 5); ctx.lineTo(centerX + dist, centerY + 5);
-            }
-            ctx.stroke();
-
-            // MGRS (右上に固定)
+            // --- 2. MGRS座標（縦線の右に収める） ---
             ctx.font = '16px monospace';
-            const mgrsText = "MGRS: " + currentMGRS;
-            const mgrsWidth = ctx.measureText(mgrsText).width;
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.fillRect(canvas.width - mgrsWidth - 20, 10, mgrsWidth + 10, 30);
-            ctx.fillStyle = '#00ff00';
-            ctx.fillText(mgrsText, canvas.width - mgrsWidth - 15, 32);
+            const mgrsPrefix = "MGRS: ";
+            const fullMGRSText = mgrsPrefix + currentMGRS;
+            const mgrsWidth = ctx.measureText(fullMGRSText).width;
+            const padding = 10;
 
-            // MIL (下部中央に固定)
-            ctx.font = '30px monospace';
+            // 半透明の背景パネル
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            // 配置位置：画面中央（縦線）の右側に少しパディングを入れて描画
+            ctx.fillRect(centerX + padding, padding, mgrsWidth + (padding * 2), 30);
+
+            // テキスト描画
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText(fullMGRSText, centerX + (padding * 2), 31);
+
+            // --- 3. MIL表示（下部中央） ---
+            ctx.font = '2.5rem monospace';
             const milText = currentMIL + " MIL";
             const milWidth = ctx.measureText(milText).width;
+
+            // 半透明背景
             ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.fillRect(centerX - milWidth/2 - 10, canvas.height - 60, milWidth + 20, 40);
+            ctx.fillRect(centerX - (milWidth / 2) - 10, canvas.height - 75, milWidth + 20, 50);
+
+            // テキスト
             ctx.fillStyle = '#00ff00';
-            ctx.fillText(milText, centerX - milWidth/2, canvas.height - 30);
+            ctx.fillText(milText, centerX - (milWidth / 2), canvas.height - 35);
 
-            requestAnimationFrame(draw);
+            requestAnimationFrame(drawHUD);
         }
-        draw();
+        drawHUD();
 
+        // MGRS整形
+        function formatMGRS(str) { return str.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3'); }
+
+        // 初期化ボタンイベント
         btn.addEventListener('click', async () => {
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const res = await DeviceOrientationEvent.requestPermission();
                 if (res !== 'granted') return;
             }
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            document.getElementById('video-feed').srcObject = stream;
-            videoTrack = stream.getVideoTracks()[0];
-            btn.style.display = 'none';
-            slider.style.display = 'block'; // スライダー表示
 
-            // ズーム初期設定
-            const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : null;
-            if (capabilities && capabilities.zoom) {
-                slider.min = capabilities.zoom.min;
-                slider.max = capabilities.zoom.max;
-                slider.step = capabilities.zoom.step;
-                slider.value = capabilities.zoom.min;
-            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                
+                // 起動成功：ボタンを切り替え
+                btn.style.display = 'none';
+                snapBtn.style.display = 'block';
 
-            navigator.geolocation.watchPosition((pos) => {
-                const res = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
-                currentMGRS = res.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
-            }, null, { enableHighAccuracy: true });
+                // GPS監視
+                navigator.geolocation.watchPosition((pos) => {
+                    const res = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
+                    currentMGRS = formatMGRS(res);
+                }, null, { enableHighAccuracy: true });
 
-            window.addEventListener('deviceorientation', (event) => {
-                let heading = event.webkitCompassHeading;
-                if (heading !== null) {
-                    currentMIL = Math.round(heading * (6400 / 360)).toString().padStart(4, '0');
-                }
-            });
+                // コンパス監視
+                window.addEventListener('deviceorientation', (event) => {
+                    let heading = event.webkitCompassHeading;
+                    if (heading !== null) {
+                        currentMIL = Math.round(heading * (6400 / 360)).toString().padStart(4, '0');
+                    }
+                });
+
+            } catch (e) { alert("カメラエラー: " + e.message); }
         });
 
-        // ズームスライダーイベント
-        slider.addEventListener('input', (e) => {
-            if (videoTrack) {
-                videoTrack.applyConstraints({ advanced: [{ zoom: e.target.value }] });
-            }
+        // 撮影機能の実装
+        snapBtn.addEventListener('click', () => {
+            const captureCanvas = document.createElement('canvas');
+            captureCanvas.width = canvas.width;
+            captureCanvas.height = canvas.height;
+            const captureCtx = captureCanvas.getContext('2d');
+
+            // 1. ビデオ映像を描画
+            captureCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // 2. HUDを描画（Canvasの中身をそのままコピー）
+            captureCtx.drawImage(canvas, 0, 0);
+
+            // 3. 画像としてダウンロード
+            const link = document.createElement('a');
+            link.download = `TacticalHUD_${Date.now()}.png`;
+            link.href = captureCanvas.toDataURL('image/png');
+            link.click();
         });
     </script>
 </body>
