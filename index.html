@@ -7,30 +7,28 @@
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: #00ff00; font-family: monospace; overflow: hidden; }
-        
-        /* カメラ映像 */
         #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
-
-        /* UIレイヤー (全体) */
+        
         #ui-layer { position: fixed; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
         
-        /* 半透明背景付きのテキストボックス */
+        /* 半透明背景の調整 */
         .bg-panel { 
-            background: rgba(0, 0, 0, 0.6); 
-            padding: 8px 12px; 
-            border-radius: 4px; 
+            background: rgba(0, 0, 0, 0.7); 
+            padding: 10px 15px; 
             border: 1px solid #00ff00;
         }
 
-        #mgrs-display { position: absolute; top: 20px; right: 20px; font-size: 1rem; }
-        #display { position: absolute; bottom: 40px; width: 100%; text-align: center; font-size: 3rem; text-shadow: 1px 1px 2px #000; }
+        /* 座標の位置：画面上部から少し下に配置 */
+        #mgrs-display { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); font-size: 1.2rem; white-space: nowrap; }
+        
+        /* MIL表示 */
+        #display { position: absolute; bottom: 40px; width: 100%; text-align: center; font-size: 3rem; text-shadow: 2px 2px 4px #000; }
 
         /* フルスクリーン十字線 */
-        .crosshair-h { position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: #00ff00; opacity: 0.7; }
-        .crosshair-v { position: absolute; left: 50%; top: 0; width: 1px; height: 100%; background: #00ff00; opacity: 0.7; }
+        .crosshair-h { position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: #00ff00; opacity: 0.8; }
+        .crosshair-v { position: absolute; left: 50%; top: 0; width: 1px; height: 100%; background: #00ff00; opacity: 0.8; }
 
-        /* スタートボタン */
-        #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px; z-index: 10; pointer-events: auto; background: #111; color: #00ff00; border: 2px solid #00ff00; }
+        #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px; z-index: 10; pointer-events: auto; background: #111; color: #00ff00; border: 2px solid #00ff00; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -40,16 +38,21 @@
         <div id="mgrs-display" class="bg-panel">MGRS: START</div>
         <div class="crosshair-h"></div>
         <div class="crosshair-v"></div>
-        <div id="display" class="bg-panel" style="display: inline-block; left: 50%; transform: translateX(-50%);">0000 MIL</div>
+        <div id="display" class="bg-panel">0000 MIL</div>
     </div>
     
-    <button id="start-btn">カメラとセンサーを起動</button>
+    <button id="start-btn">起動 (センサー・カメラ許可)</button>
 
     <script>
         const btn = document.getElementById('start-btn');
         const video = document.getElementById('video-feed');
         const display = document.getElementById('display');
         const mgrsText = document.getElementById('mgrs-display');
+
+        // MGRSのフォーマット関数 (54TYP1234567890 -> 54TYP 12345 12345)
+        function formatMGRS(str) {
+            return str.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
+        }
 
         btn.addEventListener('click', async () => {
             // センサー許可
@@ -67,14 +70,18 @@
             // GPS開始
             navigator.geolocation.watchPosition((pos) => {
                 const mgrsResult = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
-                mgrsText.innerText = `MGRS: ${mgrsResult}`;
+                mgrsText.innerText = "MGRS: " + formatMGRS(mgrsResult);
             }, null, { enableHighAccuracy: true });
 
-            // コンパス (回転しても常に北を基準にする)
+            // コンパス (横持ち補正付き)
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    let mils = Math.round(heading * (6400 / 360));
+                    // window.orientation: 0(縦), 90(右回転), -90(左回転)
+                    let orientation = window.orientation || 0;
+                    let correctedHeading = (heading - orientation + 360) % 360;
+                    
+                    let mils = Math.round(correctedHeading * (6400 / 360));
                     display.innerText = mils.toString().padStart(4, '0') + " MIL";
                 }
             });
