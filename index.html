@@ -2,70 +2,67 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
         #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; }
         #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
+        
+        /* ズーム用スライダー: カメラ起動後に表示 */
+        #zoom-slider { 
+            position: fixed; bottom: 100px; left: 20px; z-index: 20; 
+            width: 150px; pointer-events: auto; display: none;
+        }
+        
         #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; cursor: pointer; background: #111; color: #00ff00; border: 2px solid #00ff00; }
     </style>
 </head>
 <body>
     <video id="video-feed" autoplay playsinline muted></video>
     <canvas id="canvas-ui"></canvas>
+    <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1">
     <button id="start-btn">ENABLE SENSORS & CAMERA</button>
 
     <script>
         const canvas = document.getElementById('canvas-ui');
         const ctx = canvas.getContext('2d');
         const btn = document.getElementById('start-btn');
+        const slider = document.getElementById('zoom-slider');
         let currentMGRS = "INITIALIZING...";
         let currentMIL = "0000";
+        let videoTrack = null;
 
-        function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
+        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
         window.addEventListener('resize', resize);
         resize();
 
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // 十字線と目盛り設定
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
-            const strokeColor = '#00ff00';
-            
-            ctx.strokeStyle = strokeColor;
-            ctx.fillStyle = strokeColor;
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = '#00ff00';
+            ctx.fillStyle = '#00ff00';
 
-            // --- 十字線 ---
+            // 十字線
             ctx.beginPath();
             ctx.moveTo(centerX, 0); ctx.lineTo(centerX, canvas.height);
             ctx.moveTo(0, centerY); ctx.lineTo(canvas.width, centerY);
             ctx.stroke();
 
-            // --- 10MIL刻みの目盛り ---
-            // 画面の高さ（または幅）を適当なMIL換算（仮に1000MILとする）として目盛りを描画
-            // ※簡易的な計算のため、環境に合わせて調整してください
-            const unit = 20; // 10MILあたりのピクセル距離（調整可能）
+            // 10MIL刻みの目盛り
+            const unit = 20;
             for (let i = 1; i <= 5; i++) {
                 const dist = i * unit;
-                const len = 10; // 目盛りの長さ
-                // 上下
                 ctx.moveTo(centerX - 5, centerY - dist); ctx.lineTo(centerX + 5, centerY - dist);
                 ctx.moveTo(centerX - 5, centerY + dist); ctx.lineTo(centerX + 5, centerY + dist);
-                // 左右
-                ctx.moveTo(centerX - dist, centerY - 5); ctx.lineTo(centerX - dist, centerY + 5);
+                ctx.moveTo(centerX - dist, centerY - 5); ctx.lineTo(centerX + dist, centerY - 5);
                 ctx.moveTo(centerX + dist, centerY - 5); ctx.lineTo(centerX + dist, centerY + 5);
             }
             ctx.stroke();
 
-            // --- MGRS (右上に固定) ---
+            // MGRS (右上に固定)
             ctx.font = '16px monospace';
             const mgrsText = "MGRS: " + currentMGRS;
             const mgrsWidth = ctx.measureText(mgrsText).width;
@@ -74,7 +71,7 @@
             ctx.fillStyle = '#00ff00';
             ctx.fillText(mgrsText, canvas.width - mgrsWidth - 15, 32);
 
-            // --- MIL (下部中央に固定) ---
+            // MIL (下部中央に固定)
             ctx.font = '30px monospace';
             const milText = currentMIL + " MIL";
             const milWidth = ctx.measureText(milText).width;
@@ -94,7 +91,18 @@
             }
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             document.getElementById('video-feed').srcObject = stream;
+            videoTrack = stream.getVideoTracks()[0];
             btn.style.display = 'none';
+            slider.style.display = 'block'; // スライダー表示
+
+            // ズーム初期設定
+            const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : null;
+            if (capabilities && capabilities.zoom) {
+                slider.min = capabilities.zoom.min;
+                slider.max = capabilities.zoom.max;
+                slider.step = capabilities.zoom.step;
+                slider.value = capabilities.zoom.min;
+            }
 
             navigator.geolocation.watchPosition((pos) => {
                 const res = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
@@ -104,10 +112,16 @@
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    // 回転補正なしの純粋な方位
                     currentMIL = Math.round(heading * (6400 / 360)).toString().padStart(4, '0');
                 }
             });
+        });
+
+        // ズームスライダーイベント
+        slider.addEventListener('input', (e) => {
+            if (videoTrack) {
+                videoTrack.applyConstraints({ advanced: [{ zoom: e.target.value }] });
+            }
         });
     </script>
 </body>
