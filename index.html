@@ -6,10 +6,10 @@
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
         #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
         #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
-        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; cursor: pointer; background: #111; color: #00ff00; border: 2px solid #00ff00; }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; cursor: pointer; background: #111; color: #00ff00; border: 2px solid #00ff00; font-family: monospace; }
     </style>
 </head>
 <body>
@@ -35,42 +35,42 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const cx = canvas.width / 2;
             const cy = canvas.height / 2;
+            const now = new Date();
             
-            ctx.strokeStyle = '#00ff00';
-            ctx.fillStyle = '#00ff00';
-            ctx.lineWidth = 1;
-
             // --- 十字線 ---
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
             ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
             ctx.stroke();
 
-            // --- MGRS (右上に固定) ---
-            const mgrsStr = "MGRS: " + currentMGRS;
-            ctx.font = '16px monospace';
-            const mgrsW = ctx.measureText(mgrsStr).width;
-            
-            // 背景（黒・半透明）
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            ctx.fillRect(canvas.width - mgrsW - 30, 20, mgrsW + 20, 30);
-            
-            // 文字
+            // --- 1. 日時 (左上) ---
+            const timeStr = now.toLocaleDateString() + " " + now.toLocaleTimeString();
+            ctx.font = '14px monospace';
+            const timeW = ctx.measureText(timeStr).width;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(10, 10, timeW + 20, 25);
             ctx.fillStyle = '#00ff00';
-            ctx.fillText(mgrsStr, canvas.width - mgrsW - 20, 42);
+            ctx.fillText(timeStr, 20, 28);
 
-            // --- MIL (下部中央に固定) ---
+            // --- 2. MGRS (右上) ---
+            const mgrsStr = "MGRS: " + currentMGRS;
+            const mgrsW = ctx.measureText(mgrsStr).width;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(canvas.width - mgrsW - 30, 10, mgrsW + 20, 25);
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText(mgrsStr, canvas.width - mgrsW - 20, 28);
+
+            // --- 3. MIL (下部中央) ---
             const milStr = currentMIL + " MIL";
             ctx.font = 'bold 32px monospace';
             const milW = ctx.measureText(milStr).width;
-            
-            // 背景（黒・半透明）
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            ctx.fillRect(cx - (milW / 2) - 10, canvas.height - 70, milW + 20, 50);
-            
-            // 文字
+            // 下部の安全エリアを考慮して少し高さを確保
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(cx - (milW / 2) - 15, canvas.height - 90, milW + 30, 50);
             ctx.fillStyle = '#00ff00';
-            ctx.fillText(milStr, cx - (milW / 2), canvas.height - 35);
+            ctx.fillText(milStr, cx - (milW / 2), canvas.height - 52);
 
             requestAnimationFrame(draw);
         }
