@@ -22,11 +22,13 @@
             position: absolute; top: 10px; right: 10px; font-size: 0.8rem; white-space: nowrap; 
         }
         
-        /* 下部のMIL表示 */
-        #display { 
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); 
-            font-size: 2.5rem; text-shadow: 2px 2px 2px #000; 
+        /* 下部のMIL表示 (1列に収める修正) */
+        #display-container {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; align-items: baseline;
         }
+        #display-num { font-size: 2.5rem; }
+        #display-unit { font-size: 1.5rem; }
 
         /* 十字線 */
         .crosshair-h { position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: #00ff00; opacity: 0.8; }
@@ -39,10 +41,13 @@
     <video id="video-feed" autoplay playsinline muted></video>
     
     <div id="ui-layer">
-        <div id="mgrs-display" class="bg-panel">MGRS: INITIALIZING...</div>
+        <div id="mgrs-display" class="bg-panel">MGRS: START</div>
         <div class="crosshair-h"></div>
         <div class="crosshair-v"></div>
-        <div id="display" class="bg-panel">0000 MIL</div>
+        <div id="display-container" class="bg-panel">
+            <span id="display-num">0000</span>
+            <span id="display-unit">MIL</span>
+        </div>
     </div>
     
     <button id="start-btn">起動 (センサー・カメラ許可)</button>
@@ -50,7 +55,7 @@
     <script>
         const btn = document.getElementById('start-btn');
         const video = document.getElementById('video-feed');
-        const display = document.getElementById('display');
+        const displayNum = document.getElementById('display-num');
         const mgrsText = document.getElementById('mgrs-display');
         const uiLayer = document.getElementById('ui-layer');
 
@@ -66,7 +71,7 @@
         }
 
         btn.addEventListener('click', async () => {
-            // センサー・カメラ許可
+            // センサー許可
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const response = await DeviceOrientationEvent.requestPermission();
                 if (response !== 'granted') { alert("センサー許可が必要です"); return; }
@@ -79,6 +84,7 @@
 
             // 向き変更時のイベント
             window.addEventListener("orientationchange", updateOrientation);
+            updateOrientation(); // 初期化
             
             // GPS
             navigator.geolocation.watchPosition((pos) => {
@@ -86,12 +92,16 @@
                 mgrsText.innerText = "MGRS: " + formatMGRS(mgrsResult);
             }, null, { enableHighAccuracy: true });
 
-            // コンパス
+            // コンパス (横持ち補正)
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    let mils = Math.round(heading * (6400 / 360));
-                    display.innerText = mils.toString().padStart(4, '0') + " MIL";
+                    const angle = screen.orientation ? screen.orientation.angle : (window.orientation || 0);
+                    // 端末の回転分(angle)を引いて補正
+                    let correctedHeading = (heading - angle + 360) % 360;
+                    
+                    let mils = Math.round(correctedHeading * (6400 / 360));
+                    displayNum.innerText = mils.toString().padStart(4, '0');
                 }
             });
 
