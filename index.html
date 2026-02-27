@@ -2,88 +2,83 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Tactical HUD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Canvas Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: #000; overflow: hidden; }
-        
-        /* カメラ映像は全画面 */
-        #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
-        
-        /* UIをまとめるコンテナ */
-        #hud-container {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            z-index: 10; pointer-events: none; /* UI自体はタッチを阻害しない */
-            display: flex; flex-direction: column; justify-content: space-between;
-            padding: 20px; box-sizing: border-box;
-        }
-
-        /* 各パーツの装飾 */
-        .panel { background: rgba(0, 0, 0, 0.6); color: #00ff00; padding: 5px 10px; border: 1px solid #00ff00; display: inline-block; }
-        
-        /* 配置 */
-        #top-ui { align-self: flex-end; } /* 右上 */
-        #bottom-ui { align-self: center; margin-bottom: 40px; } /* 下部中央 */
-
-        /* 十字線（常に中央） */
-        #crosshair {
-            position: absolute; top: 50%; left: 50%;
-            width: 100vw; height: 100vh; transform: translate(-50%, -50%);
-            background: radial-gradient(circle, transparent 95%, #00ff0033 100%);
-            pointer-events: none;
-        }
-        #crosshair::before, #crosshair::after {
-            content: ''; position: absolute; background: #00ff00;
-        }
-        #crosshair::before { width: 100%; height: 1px; top: 50%; }
-        #crosshair::after { width: 1px; height: 100%; left: 50%; }
-
-        #start-btn { 
-            position: fixed; z-index: 100; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            padding: 20px; pointer-events: auto; background: #111; color: #00ff00; border: 2px solid #00ff00;
-        }
+        body { margin: 0; background: #000; overflow: hidden; }
+        #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; }
+        #canvas-ui { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 20px; }
     </style>
 </head>
 <body>
     <video id="video-feed" autoplay playsinline muted></video>
-    
-    <div id="hud-container">
-        <div id="top-ui"><div id="mgrs-display" class="panel">MGRS: INITIALIZING...</div></div>
-        <div id="crosshair"></div>
-        <div id="bottom-ui"><div id="display-container" class="panel"><span id="display-num">0000</span> MIL</div></div>
-    </div>
-    
-    <button id="start-btn">INITIALIZE HUD</button>
+    <canvas id="canvas-ui"></canvas>
+    <button id="start-btn">ENABLE SENSORS & CAMERA</button>
 
     <script>
+        const canvas = document.getElementById('canvas-ui');
+        const ctx = canvas.getContext('2d');
         const btn = document.getElementById('start-btn');
-        const video = document.getElementById('video-feed');
-        const displayNum = document.getElementById('display-num');
-        const mgrsText = document.getElementById('mgrs-display');
+        let currentMGRS = "INITIALIZING...";
+        let currentMIL = "0000";
+
+        // キャンバスサイズを画面に合わせる
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 描画ループ
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#00ff00';
+            ctx.fillStyle = '#00ff00';
+            ctx.font = '20px monospace';
+
+            // 十字線
+            ctx.beginPath();
+            ctx.moveTo(canvas.width/2, 0); ctx.lineTo(canvas.width/2, canvas.height);
+            ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2);
+            ctx.stroke();
+
+            // MGRS (右上)
+            ctx.fillText(currentMGRS, canvas.width - 250, 40);
+
+            // MIL (下部)
+            ctx.font = '40px monospace';
+            ctx.fillText(currentMIL + " MIL", canvas.width/2 - 80, canvas.height - 50);
+
+            requestAnimationFrame(draw);
+        }
+        draw();
 
         btn.addEventListener('click', async () => {
+            // センサー許可
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const res = await DeviceOrientationEvent.requestPermission();
                 if (res !== 'granted') return;
             }
-
+            // カメラ起動
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            video.srcObject = stream;
+            document.getElementById('video-feed').srcObject = stream;
             btn.style.display = 'none';
 
+            // GPS監視
             navigator.geolocation.watchPosition((pos) => {
-                const mgrsResult = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
-                mgrsText.innerText = "MGRS: " + mgrsResult.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
+                const res = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
+                currentMGRS = "MGRS: " + res.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
             }, null, { enableHighAccuracy: true });
 
+            // 方位監視
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    let orientation = window.orientation || 0;
-                    // 音量ボタン下持ちを前提とした補正
-                    let correctedHeading = (heading - orientation + 360) % 360;
-                    displayNum.innerText = Math.round(correctedHeading * (6400 / 360)).toString().padStart(4, '0');
+                    let correctedHeading = (heading - (window.orientation || 0) + 360) % 360;
+                    currentMIL = Math.round(correctedHeading * (6400 / 360)).toString().padStart(4, '0');
                 }
             });
         });
