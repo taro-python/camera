@@ -2,58 +2,56 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Tactical HUD</title>
     <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
     <style>
-        body { margin: 0; background: #000; color: #00ff00; font-family: 'Courier New', monospace; overflow: hidden; }
+        body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: #000; overflow: hidden; }
         
+        /* カメラ映像は全画面 */
         #video-feed { position: fixed; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
         
-        /* UI層: 回転させずに絶対座標で固定 */
-        #ui-layer { 
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
-            z-index: 2; pointer-events: none;
+        /* UIをまとめるコンテナ */
+        #hud-container {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 10; pointer-events: none; /* UI自体はタッチを阻害しない */
+            display: flex; flex-direction: column; justify-content: space-between;
+            padding: 20px; box-sizing: border-box;
         }
 
-        .bg-panel { background: rgba(0, 0, 0, 0.7); padding: 5px 12px; border: 1px solid #00ff00; }
-
-        /* 座標表示: 右上に固定 */
-        #mgrs-display { 
-            position: absolute; top: 20px; right: 20px; 
-            font-size: 0.8rem; white-space: nowrap; 
-        }
+        /* 各パーツの装飾 */
+        .panel { background: rgba(0, 0, 0, 0.6); color: #00ff00; padding: 5px 10px; border: 1px solid #00ff00; display: inline-block; }
         
-        /* MIL表示: 下部中央に1行で */
-        #display-container {
-            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
-            display: flex; align-items: baseline; gap: 8px;
-            font-size: 2.5rem; text-shadow: 2px 2px 2px #000;
-            white-space: nowrap;
-        }
+        /* 配置 */
+        #top-ui { align-self: flex-end; } /* 右上 */
+        #bottom-ui { align-self: center; margin-bottom: 40px; } /* 下部中央 */
 
-        /* 十字線 */
-        .crosshair-h { position: absolute; top: 50%; left: 0; width: 100vw; height: 1px; background: #00ff00; opacity: 0.8; }
-        .crosshair-v { position: absolute; left: 50%; top: 0; width: 1px; height: 100vh; background: #00ff00; opacity: 0.8; }
+        /* 十字線（常に中央） */
+        #crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 100vw; height: 100vh; transform: translate(-50%, -50%);
+            background: radial-gradient(circle, transparent 95%, #00ff0033 100%);
+            pointer-events: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: ''; position: absolute; background: #00ff00;
+        }
+        #crosshair::before { width: 100%; height: 1px; top: 50%; }
+        #crosshair::after { width: 1px; height: 100%; left: 50%; }
 
         #start-btn { 
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            padding: 20px; z-index: 10; pointer-events: auto; 
-            background: #111; color: #00ff00; border: 2px solid #00ff00; cursor: pointer;
+            position: fixed; z-index: 100; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            padding: 20px; pointer-events: auto; background: #111; color: #00ff00; border: 2px solid #00ff00;
         }
     </style>
 </head>
 <body>
     <video id="video-feed" autoplay playsinline muted></video>
     
-    <div id="ui-layer">
-        <div id="mgrs-display" class="bg-panel">MGRS: START</div>
-        <div class="crosshair-h"></div>
-        <div class="crosshair-v"></div>
-        <div id="display-container" class="bg-panel">
-            <span id="display-num">0000</span>
-            <span>MIL</span>
-        </div>
+    <div id="hud-container">
+        <div id="top-ui"><div id="mgrs-display" class="panel">MGRS: INITIALIZING...</div></div>
+        <div id="crosshair"></div>
+        <div id="bottom-ui"><div id="display-container" class="panel"><span id="display-num">0000</span> MIL</div></div>
     </div>
     
     <button id="start-btn">INITIALIZE HUD</button>
@@ -64,42 +62,28 @@
         const displayNum = document.getElementById('display-num');
         const mgrsText = document.getElementById('mgrs-display');
 
-        function formatMGRS(str) { return str.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3'); }
-
         btn.addEventListener('click', async () => {
-            // 1. センサー許可
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const res = await DeviceOrientationEvent.requestPermission();
-                if (res !== 'granted') { alert("センサー許可が必要です"); return; }
+                if (res !== 'granted') return;
             }
 
-            // 2. カメラ起動
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                video.srcObject = stream;
-            } catch (e) { alert("カメラエラー: " + e.message); }
-
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            video.srcObject = stream;
             btn.style.display = 'none';
 
-            // 3. GPS監視
             navigator.geolocation.watchPosition((pos) => {
                 const mgrsResult = mgrs.forward([pos.coords.longitude, pos.coords.latitude]);
-                mgrsText.innerText = "MGRS: " + formatMGRS(mgrsResult);
+                mgrsText.innerText = "MGRS: " + mgrsResult.replace(/(\w{5})(\d{5})(\d{5})/, '$1 $2 $3');
             }, null, { enableHighAccuracy: true });
 
-            // 4. コンパス (背面カメラ補正ロジック)
             window.addEventListener('deviceorientation', (event) => {
                 let heading = event.webkitCompassHeading;
                 if (heading !== null) {
-                    // window.orientation: 0(縦), 90(右回転/音量下), -90(左回転/音量上)
                     let orientation = window.orientation || 0;
-                    
-                    // 【重要】左手持ち（音量下）の場合、headingから90引くのが正しい補正です
-                    // 逆の場合はここを (heading + orientation) に変更してください
+                    // 音量ボタン下持ちを前提とした補正
                     let correctedHeading = (heading - orientation + 360) % 360;
-                    
-                    let mils = Math.round(correctedHeading * (6400 / 360));
-                    displayNum.innerText = mils.toString().padStart(4, '0');
+                    displayNum.innerText = Math.round(correctedHeading * (6400 / 360)).toString().padStart(4, '0');
                 }
             });
         });
